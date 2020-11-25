@@ -141,7 +141,7 @@ zscore_SLC2A2_median <- median(cesc_survival_data$zscore_value_SLC2A2)
 
 
 #generate a column of data which will tag the patient as either expressing SLC2A1 above the median or below the median
-cesc_survival_data$SLC2A1_greater_lesser_median <- ifelse(cesc_survival_data$zscore_value_SLC2A1 < zscore_SLC2A1_median, "More Than Median", "Less Than Median")
+cesc_survival_data$SLC2A1_greater_lesser_median <- ifelse(cesc_survival_data$zscore_value_SLC2A1 > zscore_SLC2A1_median, "More Than Median", "Less Than Median")
 
 #generate a column of data which will tag the patient as either expressing SLC2A2 above the median or below the median
 cesc_survival_data$SLC2A2_greater_lesser_median <- ifelse(cesc_survival_data$zscore_value_SLC2A2 > zscore_SLC2A2_median, "More Than Median", "Less Than Median")
