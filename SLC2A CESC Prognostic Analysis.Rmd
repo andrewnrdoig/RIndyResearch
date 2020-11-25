@@ -1,0 +1,371 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+##To Do
+#Matching of patient clinical data and assay data was done through simple alphabetical ordering and matching row numbers, IT IS NOT ROBUST.
+#Therefore, a careful scrutiny of matching columns data accuracy should be conducted before acceptance.
+
+#Load Libraries
+```{r}
+library(tidyverse) 
+library(survminer)
+library(survival)
+library(ggplot2)
+library(rlang)
+library(viridis)
+library(hrbrthemes)
+library(rmarkdown)
+library(knitr)
+library(plotly)
+library(coin)
+library(huxtable)
+```
+
+#Data Wrangling
+```{r}
+#Data Wrangling
+
+#Import patient clinical data into a tibble
+all_clin_data <- read_tsv("cesc_tcga\\data_bcr_clinical_data_patient.txt", 
+                          col_names = TRUE, skip = 4)
+
+#Import mutation data extended
+all_mutation_extended <- read_tsv("cesc_tcga\\data_mutations_extended.txt")
+
+
+#Import median RNA Seq v2 expression data
+all_expression_median <- read_tsv("cesc_tcga\\data_RNA_Seq_v2_expression_median.txt",
+                                  col_names = TRUE)
+
+#THIS IS THE EXPRESSION DATA THAT WE NEED!
+#Import median RNA Seq v2 expression z scores data
+all_expression_median_Zscores <- read_tsv("cesc_tcga\\data_RNA_Seq_v2_mRNA_median_Zscores.txt",
+                                          col_names = TRUE)
+
+#Generate a list of SCL2A2 zscore expression data
+zscore_SLC2A2 <- filter(all_expression_median_Zscores, Hugo_Symbol == "SLC2A2")
+
+#generate a list of SLC2A1 zscore expression data
+zscore_SLC2A1 <- filter(all_expression_median_Zscores, Hugo_Symbol == "SLC2A1")
+
+#Generate a list of SLC2A2 expression data
+SLC2A2_expression_modified <- filter(all_expression_median, Hugo_Symbol =="SLC2A2")
+
+#Generate a list of SLC2A1 expression data
+SLC2A1_expression_modified <- filter(all_expression_median, Hugo_Symbol =="SLC2A1")
+
+#Sort expression data by sample name, convert to a longer form
+SLC2A1_expression <- gather(SLC2A1_expression_modified, key = "Sample", value = "RNA_Seq_v2_expression_median", 3:308)
+SLC2A1_expression <- SLC2A1_expression[order(SLC2A1_expression$Sample),]
+
+#Sort expression data by sample name, convert to a longer form
+SLC2A2_expression <- gather(SLC2A2_expression_modified, key = "Sample", value = "RNA_Seq_v2_expression_median", 3:308)
+SLC2A2_expression <- SLC2A2_expression[order(SLC2A2_expression$Sample),]
+
+#Sort zscore expression data by sample name, convert to a longer form, SLC2A2
+zscore_SLC2A1 <- gather(zscore_SLC2A1, key = "Sample", value = "zscore_expression_medians", 3:308)
+zscore_SLC2A1 <- zscore_SLC2A1[order(zscore_SLC2A1$Sample),]
+
+#Sort zscore expression data by sample name, convert to a longer form, SLC2A1
+zscore_SLC2A2 <- gather(zscore_SLC2A2, key = "Sample", value = "zscore_expression_medians", 3:308)
+zscore_SLC2A2 <- zscore_SLC2A2[order(zscore_SLC2A2$Sample),]
+
+#order clinical data by patient id name
+cesc_clin_data <- all_clin_data
+cesc_clin_data <- cesc_clin_data[order(cesc_clin_data$PATIENT_ID),]
+cesc_clin_data <- cesc_clin_data[-c(264), ]# remove a patient whose expression data wasnt collected
+
+#Create a new tibble for the survival and expression values we will use in statistical analysis
+cesc_survival_data <- tibble(
+  patient_id = cesc_clin_data$PATIENT_ID,
+  zscore_SLC2A1_sampleid = zscore_SLC2A1$Sample,
+  zscore_SLC2A2_sampleid = zscore_SLC2A2$Sample,
+  expression_sample_id = SLC2A2_expression$Sample,
+  zscore_value_SLC2A1 = zscore_SLC2A1$zscore_expression_medians,
+  zscore_value_SLC2A2 = zscore_SLC2A2$zscore_expression_medians,
+  SLC2A1_expression_data = SLC2A1_expression$RNA_Seq_v2_expression_median,  
+  SLC2A2_expression_data = SLC2A2_expression$RNA_Seq_v2_expression_median,
+  survival_status = as.numeric(substring(cesc_clin_data$OS_STATUS,1,1)),
+  survival_time = as.numeric(cesc_clin_data$OS_MONTHS),
+  histiological_diagnosis = cesc_clin_data$HISTOLOGICAL_DIAGNOSIS,
+  keratinizing_squamous = cesc_clin_data$KERATINIZATION_SQUAMOUS_CELL,
+  clinical_stage = cesc_clin_data$CLINICAL_STAGE,
+  disease_free_status = as.numeric(substring(cesc_clin_data$DFS_STATUS,1,1)),
+  disease_free_months = cesc_clin_data$DFS_MONTHS,
+  age = as.numeric(cesc_clin_data$AGE),
+)
+
+#remove non-Cervical Squamous Cell Carcinoma Patients
+cesc_survival_data <- filter(cesc_survival_data, histiological_diagnosis == "Cervical Squamous Cell Carcinoma")
+
+#Create quartile groupings of expression of SLC2A1 zscore
+cesc_survival_data <- cesc_survival_data %>% mutate(zscore_value_SLC2A1_quartile = ntile(cesc_survival_data$zscore_value_SLC2A1, 4))
+
+#Create quartile groupings of expression of SLC2A2 means
+cesc_survival_data <- cesc_survival_data %>% mutate(zscore_value_SLC2A2_quartile = ntile(cesc_survival_data$zscore_value_SLC2A2, 4))
+
+
+#convert the numeric quartile data into vector data for use by cox regression
+cesc_survival_data$SLC2A1_expression_quartile <- factor(cesc_survival_data$SLC2A1_expression_data,
+                                                        levels = c("1","2","3","4"),
+                                                        labels = c("Low Exp.", "Med. Low Exp.", "Med. High Exp.", "High Exp."))
+
+#convert the numeric quartile data into vector data for use by cox regression
+cesc_survival_data$SLC2A2_expression_quartile <- factor(cesc_survival_data$SLC2A2_expression_data,
+                                                        levels = c("1","2","3","4"),
+                                                        labels = c("Low Exp.", "Med. Low Exp.", "Med. High Exp.", "High Exp."))
+
+#convert the numeric quartile data into vector data for use by cox regression
+cesc_survival_data$zscore_value_SLC2A1_quartile <- factor(cesc_survival_data$zscore_value_SLC2A1_quartile,
+                                                          levels = c("1","2","3","4"),
+                                                          labels = c("Low Exp.", "Med. Low Exp.", "Med. High Exp.", "High Exp."))
+
+#convert the numeric quartile data into vector data for use by cox regression
+cesc_survival_data$zscore_value_SLC2A2_quartile <- factor(cesc_survival_data$zscore_value_SLC2A2_quartile,
+                                                          levels = c("1","2","3","4"),
+                                                          labels = c("Low Exp.", "Med. Low Exp.", "Med. High Exp.", "High Exp."))
+
+#convert the character stage of cancer to a factor
+cesc_survival_data$clinical_stage <- factor(cesc_survival_data$clinical_stage,
+                                            levels = c("Stage I", "Stage IA", "Stage IA1", "Stage IA2", "Stage IB", "Stage IB1", "Stage IB2", "Stage II", "Stage IIA", "Stage IIA1", "Stage IIA2", "Stage IIB", "Stage III", "Stage IIIA", "Stage IIIB", "Stage IVA", "Stage IVB"),
+                                            labels = c("1",             "1",        "1",         "1",        "1",       "1",           "1",         "2",       "2",        "2",           "2",          "2",          "3",         "3",           "3",         "4",          "4")
+)
+
+#Compute median of SLC2A1
+zscore_SLC2A1_median <- median(cesc_survival_data$zscore_value_SLC2A1)
+
+#compute median of SLC22
+zscore_SLC2A2_median <- median(cesc_survival_data$zscore_value_SLC2A2)
+
+
+#generate a column of data which will tag the patient as either expressing SLC2A1 above the median or below the median
+cesc_survival_data$SLC2A1_greater_lesser_median <- ifelse(cesc_survival_data$zscore_value_SLC2A1 < zscore_SLC2A1_median, "More Than Median", "Less Than Median")
+
+#generate a column of data which will tag the patient as either expressing SLC2A2 above the median or below the median
+cesc_survival_data$SLC2A2_greater_lesser_median <- ifelse(cesc_survival_data$zscore_value_SLC2A2 > zscore_SLC2A2_median, "More Than Median", "Less Than Median")
+
+
+#convert the character less than greater than median expression data into factor data for use by survival function and cox regressions
+cesc_survival_data$SLC2A1_greater_lesser_median <- factor(cesc_survival_data$SLC2A1_greater_lesser_median,
+                                                          levels = c("Less Than Median","More Than Median"),
+                                                          labels = c("Less Than Median","More Than Median"))
+
+#convert the character less than greater than median expression data into factor data for use by survival function and cox regressions
+cesc_survival_data$SLC2A2_greater_lesser_median <- factor(cesc_survival_data$SLC2A2_greater_lesser_median,
+                                                          levels = c("Less Than Median","More Than Median"),
+                                                          labels = c("Less Than Median","More Than Median"))
+```
+#Survival Analysis
+```{r}
+#Survival Analysis
+
+#Generate survival object
+survival_object <- Surv(time = cesc_survival_data$survival_time, event = cesc_survival_data$survival_status)
+
+#Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A1
+quartiles_SLC2A1_expression_survival_curve <- survfit(survival_object ~ zscore_value_SLC2A1_quartile, data = cesc_survival_data)
+
+#Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A1
+quartiles_SLC2A2_expression_survival_curve <- survfit(survival_object ~ zscore_value_SLC2A2_quartile, data = cesc_survival_data)
+
+#Fit survival data to a curve that is defined by the median greater lesser than values
+greater_lesser_than_median_expression_curve_SLC2A1 <- survfit(survival_object ~ SLC2A1_greater_lesser_median, data = cesc_survival_data )
+
+#Fit survival data to a curve that is defined by the median greater lesser than values
+greater_lesser_than_median_expression_curve_SLC2A2 <- survfit(survival_object ~ SLC2A2_greater_lesser_median, data = cesc_survival_data )
+
+#analyze cox proportional hazard model using the zscore quartileas the sole covariate at this point
+SLC2A1_zscore_survival_curve.coxph <- coxph(survival_object ~ zscore_value_SLC2A1_quartile, data = cesc_survival_data)
+
+#analyze cox proportional hazard model using the zscore quartileas the sole covariate at this point
+SLC2A2_zscore_survival_curve.coxph <- coxph(survival_object ~ zscore_value_SLC2A2_quartile, data = cesc_survival_data)
+
+#plot the SLC2A1 hazard ratios to a forest graph
+ggforest(SLC2A1_zscore_survival_curve.coxph, data = cesc_survival_data)
+
+#plot the SLC2A2 hazard ratios to a forest graph
+ggforest(SLC2A2_zscore_survival_curve.coxph, data = cesc_survival_data)
+
+#Perform a Gehan-Breslow-Wolcoxan test rather than the standard logrank test to data to a curve that is defined by the quantiles of zscore SLC2A1
+#GBW_quarntiles_SLC2A1_expression_survival_curve <- logrank_test(survival_object, ties.method #=c("mid-ranks"), type = c("Gehan-Breslow"))
+
+```
+#Patient Characteristics
+```{r}
+#Patient Characteristics Analysis
+
+age_mean <- mean(cesc_survival_data$age)
+age_sd <- sd(cesc_survival_data$age)
+
+survival_months_mean <-mean(cesc_survival_data$survival_time)
+survival_months_sd <-sd(cesc_survival_data$survival_time)
+
+
+count_stage_1_patients <- length(which(cesc_survival_data$clinical_stage == 1))
+count_stage_2_patients <- length(which(cesc_survival_data$clinical_stage == 2))
+count_stage_3_patients <- length(which(cesc_survival_data$clinical_stage == 3))
+count_stage_4_patients <- length(which(cesc_survival_data$clinical_stage == 4))
+
+#Generate a table of patient characteristics
+summary_patient_statistics <- tibble(
+  Mean_Age = paste(age_mean, age_sd, sep = "+-", collapse = NULL),
+  Mean_Survival_Months = paste(survival_months_mean, survival_months_sd, sep = "+-", collapse = NULL)
+)
+```
+#Clinical Stages, not used at this point
+```{r}
+################################################################################
+#Expression level and clinical stages of SLC2A1 and SLC2A2
+
+###SLC2A1###
+#create cohort of stage 1 and 2 patients,
+stage_IandII_SLC2A1_patients <- filter(cesc_survival_data, (clinical_stage == "1" | clinical_stage == "2"))
+
+#group stage
+stage_IandII_SLC2A1_patients$clinical_stage <- "Stage I & II"
+
+#create cohort of stage 3 and 4 patients
+stage_IIIandIV_SLC2A1_patients <- filter(cesc_survival_data, (clinical_stage == "3" | clinical_stage == "4"))
+
+#group stage
+stage_IIIandIV_SLC2A1_patients$clinical_stage <- "Stage III & IV"
+
+##Consider reworking these plots in the library plotly, the output looks better and matches the model paper
+
+
+#####################################SLC2A2############################################
+
+#create cohort of stage 1 and 2 patients,
+stage_IandII_SLC2A2_patients <- filter(cesc_survival_data, (clinical_stage == "1" | clinical_stage == "2"))
+
+#group stage
+stage_IandII_SLC2A2_patients$clinical_stage <- "Stage I & II"
+
+#create cohort of stage 3 and 4 patients
+stage_IIIandIV_SLC2A2_patients <- filter(cesc_survival_data, (clinical_stage == "3" | clinical_stage == "4"))
+
+#group stage
+stage_IIIandIV_SLC2A2_patients$clinical_stage <- "Stage III & IV"
+```
+#Ouput Section
+```{r}
+###############################################################################################
+###OUTPUT SECTION
+
+#Generate a graph of survival object/expression quartile curve of zscore SLC2A1 median quartiles
+ggsurvplot(quartiles_SLC2A1_expression_survival_curve, data = cesc_survival_data, 
+           #conf.int = TRUE,
+           pval = TRUE,
+           fun = "pct",
+           risk.table = TRUE,
+           size = 1,
+           linetype = "strata",
+           #palette = c("#E7B800", "#2E9FDF"),
+           legend = "bottom",
+           legend.title = "Expression Quartiles",
+           legend.labs = c("Low Exp.", "Med. Low Exp.", "Med. High Exp.", "High Exp.")
+)
+
+#Generate a graph of survival object/expression quartile curve of zscore SLC2A2 median quartiles
+ggsurvplot(quartiles_SLC2A2_expression_survival_curve, data = cesc_survival_data, 
+           #conf.int = TRUE,
+           pval = TRUE,
+           fun = "pct",
+           risk.table = TRUE,
+           size = 1,
+           linetype = "strata",
+           #palette = c("#E7B800", "#2E9FDF"),
+           legend = "bottom",
+           legend.title = "Expression Quartiles",
+           legend.labs = c("Low Exp.", "Med. Low Exp.", "Med. High Exp.", "High Exp.")
+)
+
+#Generate a graph of survival object/expression greater or lesser than median curve of zscore SLC2A1 median
+ggsurvplot(greater_lesser_than_median_expression_curve_SLC2A1, data = cesc_survival_data, 
+           #conf.int = TRUE,
+           pval = TRUE,
+           fun = "pct",
+           risk.table = TRUE,
+           size = 1,
+           linetype = "strata",
+           #palette = c("#E7B800", "#2E9FDF"),
+           legend = "bottom",
+          # legend.title = "SLC2A1 Greater or Lesser than Median",
+           legend.labs = c("Less than Median", "More than Median")
+)           
+
+#Generate a graph of survival object/expression greater or lesser than median curve of zscore SLC2A1 median
+ggsurvplot(greater_lesser_than_median_expression_curve_SLC2A2, data = cesc_survival_data, 
+           #conf.int = TRUE,
+           pval = TRUE,
+           fun = "pct",
+           risk.table = TRUE,
+           size = 1,
+           linetype = "strata",
+           #palette = c("#E7B800", "#2E9FDF"),
+           legend = "bottom",
+         #  legend.title = "SLC2A1 Greater or Lesser than Median",
+           legend.labs = c("Less than Median", "More than Median")
+)           
+
+# Plot
+stage_IandII_SLC2A1_patients %>%
+  ggplot( aes(x=clinical_stage, y=zscore_value_SLC2A1,)) +
+  geom_boxplot() +
+  scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("SLC2A1 Zscore Expression") +
+  xlab("")
+
+# Plot
+stage_IIIandIV_SLC2A1_patients %>%
+  ggplot( aes(x=clinical_stage, y=zscore_value_SLC2A1,)) +
+  geom_boxplot() +
+  scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("SLC2A1 Zscore Expression") +
+  xlab("")
+
+# Plot
+stage_IandII_SLC2A2_patients %>%
+  ggplot( aes(x=clinical_stage, y=zscore_value_SLC2A2,)) +
+  geom_boxplot() +
+  scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("SLC2A2 Zscore Expression") +
+  xlab("")
+
+# Plot
+stage_IIIandIV_SLC2A2_patients %>%
+  ggplot( aes(x=clinical_stage, y=zscore_value_SLC2A2,)) +
+  geom_boxplot() +
+  scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+  geom_jitter(color="black", size=0.4, alpha=0.9) +
+  theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("SLC2A2 Zscore Expression") +
+  xlab("")
+
+plotly_fig <- stage_IIIandIV_SLC2A2_patients %>% plot_ly(y = ~rnorm(50), type = "box", boxpoints = "all", jitter = 0.3,
+               pointpos = -1.8)
+```
