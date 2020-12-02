@@ -1,5 +1,4 @@
 # RIndyResearch
 Independant Study Data Mining
 
-The original version has evolved quite a bit without properly using github... now that I am drowning in different versions it seems time to adopt the tool.
-Hopefully the learning curve isn't too severe.
+Independant research project at Framingham State University by Andrew Doig. An investigation into the prognostic power for SLC2A2 in Cervical Squamous Cell Carcinoma.
