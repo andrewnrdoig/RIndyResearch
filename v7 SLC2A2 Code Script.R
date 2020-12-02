@@ -1,4 +1,7 @@
 
+  ##To Do
+  #We have improved the sample/patient matching system to clear mismatches. However, there were two patients whose expression was #not present. Removing those rows by index around line 104 is not super robust. If the data changes this will need to be #manually checked.
+  #Load Libraries
 library(tidyverse) 
 library(survminer)
 library(survival)
@@ -7,6 +10,9 @@ library(rlang)
 library(rmarkdown)
 library(knitr)
 library(coin)
+
+#Data Wrangling
+#Data Wrangling
 
 #Import patient clinical data into a tibble
 all_clin_data <- read_tsv("data\\cesc_tcga\\data_bcr_clinical_data_patient.txt", 
@@ -38,6 +44,7 @@ zscore_SLC2A2 <- gather(zscore_SLC2A2, key = "Sample", value = "zscore_expressio
 zscore_SLC2A2 <- zscore_SLC2A2[order(zscore_SLC2A2$Sample),]
 zscore_SLC2A2 <- rename(zscore_SLC2A2, SLC2A2_zscore_expression_medians = zscore_expression_medians)
 
+
 #Create a new tibble for the final data. We will sort from this list, and then do a sample ID check to load it with expression data.
 
 cesc_survival_data <- tibble(
@@ -58,7 +65,6 @@ cesc_survival_data <- tibble(
 
 
 #Manipulate Data Frame
-
 #remove non-Cervical Squamous Cell Carcinoma Patients from final data frame
 cesc_survival_data <- filter(cesc_survival_data, histiological_diagnosis == "Cervical Squamous Cell Carcinoma")
 
@@ -123,13 +129,7 @@ cesc_survival_data$SLC2A1_greater_lesser_median <- factor(cesc_survival_data$SLC
 cesc_survival_data$SLC2A2_greater_lesser_median <- factor(cesc_survival_data$SLC2A2_greater_lesser_median,
                                                           levels = c("Less Than Median","More Than Median"),
                                                           labels = c("Less Than Median","More Than Median"))
-
-
-
-
-
 #Survival Analysis
-
 #Survival Analysis
 
 #Generate survival object
@@ -138,7 +138,7 @@ survival_object <- Surv(time = cesc_survival_data$survival_time, event = cesc_su
 #Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A1
 quartiles_SLC2A1_expression_survival_curve <- survfit(survival_object ~ zscore_value_SLC2A1_quartile, data = cesc_survival_data)
 
-#Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A1
+#Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A2
 quartiles_SLC2A2_expression_survival_curve <- survfit(survival_object ~ zscore_value_SLC2A2_quartile, data = cesc_survival_data)
 
 #Fit survival data to a curve that is defined by the median greater lesser than values
@@ -146,7 +146,6 @@ greater_lesser_than_median_expression_curve_SLC2A1 <- survfit(survival_object ~ 
 
 #Fit survival data to a curve that is defined by the median greater lesser than values
 greater_lesser_than_median_expression_curve_SLC2A2 <- survfit(survival_object ~ SLC2A2_greater_lesser_median, data = cesc_survival_data )
-
 #Ouput Section
 
 ###############################################################################################
@@ -212,4 +211,3 @@ ggsurvplot(greater_lesser_than_median_expression_curve_SLC2A2, data = cesc_survi
            caption = "SLC2A2 Expression Median Survival Curve"
            
 )           
-
