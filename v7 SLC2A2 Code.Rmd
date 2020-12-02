@@ -149,11 +149,6 @@ cesc_survival_data$SLC2A2_greater_lesser_median <- factor(cesc_survival_data$SLC
                                                          levels = c("Less Than Median","More Than Median"),
                                                           labels = c("Less Than Median","More Than Median"))
 ```
-
-
-
-
-
 #Survival Analysis
 ```{r}
 #Survival Analysis
@@ -164,7 +159,7 @@ survival_object <- Surv(time = cesc_survival_data$survival_time, event = cesc_su
 #Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A1
 quartiles_SLC2A1_expression_survival_curve <- survfit(survival_object ~ zscore_value_SLC2A1_quartile, data = cesc_survival_data)
 
-#Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A1
+#Fit the survival data to a curve that is defined by the quartiles of zscore SLC2A2
 quartiles_SLC2A2_expression_survival_curve <- survfit(survival_object ~ zscore_value_SLC2A2_quartile, data = cesc_survival_data)
 
 #Fit survival data to a curve that is defined by the median greater lesser than values
